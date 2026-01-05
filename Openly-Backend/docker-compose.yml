@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15
+    container_name: openly_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: openly
+      POSTGRES_PASSWORD: openly
+      POSTGRES_DB: openly_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - openly_pgdata:/var/lib/postgresql/data
+
+volumes:
+  openly_pgdata:
