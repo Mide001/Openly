@@ -15,7 +15,7 @@ contract DeployWithMockUSDC is Script {
 
         address deployer = vm.addr(deployerPrivateKey);
         console2.log("======================================");
-        console2.log("Deploying with Mock USDC (base-sepolia");
+        console2.log("Deploying with Mock USDC (base-sepolia)");
         console2.log("======================================");
         console2.log("Deployer: ", deployer);
 
@@ -23,7 +23,7 @@ contract DeployWithMockUSDC is Script {
 
         // Deploy mock USDC
         MockUSDC usdc = new MockUSDC();
-        console2.log("Mock. USDC deployed at: ", address(usdc));
+        console2.log("Mock USDC deployed at: ", address(usdc));
 
         // Mint test USDC
         usdc.mint(deployer, 100000 * 10 ** 6); // 100,000 USDC
@@ -36,18 +36,12 @@ contract DeployWithMockUSDC is Script {
         );
         console2.log("OpenlyGateway deployed at: ", address(openlyGateway));
 
-        address testMerchant = address(
-            0x1234567890123456789012345678901234567890
-        );
-        console2.log("Test merchant address: ", testMerchant);
-
+        // Generate a sample test address (to verify off-chain logic)
         string memory merchantId = "merchant_test_001";
-        string memory userId = "user_test_001";
         string memory paymentRef = "payment_test_001";
 
         address paymentAddress = openlyGateway.computeForwarderAddress(
             merchantId,
-            userId,
             paymentRef
         );
         console2.log("Test Payment Address: ", paymentAddress);
@@ -63,7 +57,7 @@ contract DeployWithMockUSDC is Script {
         string memory deployCmd = string.concat(
             "   cast send ",
             vm.toString(address(openlyGateway)),
-            " 'deployForwarder(string,string)' 'merchant_test_001' 'invoice_001' --private-key ",
+            " 'deployForwarder(string,string)' 'merchant_test_001' 'payment_test_001' --private-key ",
             vm.toString(deployerPrivateKey)
         );
         console2.log(deployCmd);
