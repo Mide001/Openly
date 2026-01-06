@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 interface IPaymentGateway {
     function recordPayment(
         string calldata merchantId,
-        string calldata userId,
         string calldata paymentRef,
         uint256 amount
     ) external;
@@ -34,11 +33,11 @@ contract PaymentForwarder {
      */
     function forward(
         string calldata merchantId,
-        string calldata userId,
         string calldata paymentRef,
         uint256 amount
     ) external {
         require(amount > 0, "Amount must be greater than 0");
+
         IERC20 usdc = IERC20(usdcToken);
         require(
             usdc.balanceOf(address(this)) >= amount,
@@ -46,18 +45,14 @@ contract PaymentForwarder {
         );
 
         SafeERC20.safeTransfer(usdc, gateway, amount);
-        IPaymentGateway(gateway).recordPayment(
-            merchantId,
-            userId,
-            paymentRef,
-            amount
-        );
+
+        IPaymentGateway(gateway).recordPayment(merchantId, paymentRef, amount);
     }
 }
 
 /**
  * @title OpenlyGateway
- * @notice Main payment gateway contract for Openly
+ * @notice Main payment gateway contract for businesses to accept payments in USDC
  */
 contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -75,7 +70,6 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
     event PaymentReceived(
         string indexed merchantId,
-        string indexed userId,
         string indexed paymentRef,
         uint256 amount,
         address payer,
@@ -84,7 +78,6 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
     event PaymentForwarderDeployed(
         string indexed merchantId,
-        string indexed userId,
         string indexed paymentRef,
         address forwarderAddress,
         uint256 timestamp
@@ -112,16 +105,14 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
     function computeForwarderAddress(
         string calldata merchantId,
-        string calldata userId,
         string calldata paymentRef
     ) public view returns (address) {
-        bytes32 salt = keccak256(
-            abi.encodePacked(merchantId, userId, paymentRef)
-        );
+        bytes32 salt = keccak256(abi.encodePacked(merchantId, paymentRef));
         bytes memory bytecode = abi.encodePacked(
             type(PaymentForwarder).creationCode,
             abi.encode(address(this), address(usdcToken))
         );
+
         bytes32 hash = keccak256(
             abi.encodePacked(
                 bytes1(0xff),
@@ -136,12 +127,9 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
     function deployForwarder(
         string calldata merchantId,
-        string calldata userId,
         string calldata paymentRef
     ) external whenNotPaused returns (address forwarder) {
-        bytes32 salt = keccak256(
-            abi.encodePacked(merchantId, userId, paymentRef)
-        );
+        bytes32 salt = keccak256(abi.encodePacked(merchantId, paymentRef));
 
         bytes memory bytecode = abi.encodePacked(
             type(PaymentForwarder).creationCode,
@@ -157,7 +145,6 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
         emit PaymentForwarderDeployed(
             merchantId,
-            userId,
             paymentRef,
             forwarder,
             block.timestamp
@@ -166,27 +153,21 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
     function recordPayment(
         string calldata merchantId,
-        string calldata userId,
         string calldata paymentRef,
-        uint amount
+        uint256 amount
     ) external whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
 
+        // SECURITY: Verify that the caller is the expected forwarder address
+        // This prevents ANYONE from calling this function directly
         address expectedForwarder = computeForwarderAddress(
             merchantId,
-            userId,
             paymentRef
         );
         require(msg.sender == expectedForwarder, "Unauthorized caller");
 
         bytes32 paymentId = keccak256(
-            abi.encodePacked(
-                merchantId,
-                userId,
-                paymentRef,
-                amount,
-                block.timestamp
-            )
+            abi.encodePacked(merchantId, paymentRef, amount, block.timestamp)
         );
         require(!processedPayments[paymentId], "Payment already processed");
 
@@ -195,7 +176,6 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
 
         emit PaymentReceived(
             merchantId,
-            userId,
             paymentRef,
             amount,
             msg.sender,
@@ -232,7 +212,7 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
         require(
             merchantIds.length == recipients.length &&
                 recipients.length == amounts.length,
-            "Array length must match"
+            "Array length mismatch"
         );
 
         for (uint256 i = 0; i < merchantIds.length; i++) {
@@ -263,7 +243,6 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
     function setMinWithdrawal(uint256 newMin) external onlyRole(ADMIN_ROLE) {
         uint256 oldMin = minWithdrawal;
         minWithdrawal = newMin;
-
         emit MinWithdrawalUpdated(oldMin, newMin);
     }
 
