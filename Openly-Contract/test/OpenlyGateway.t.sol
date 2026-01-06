@@ -31,14 +31,11 @@ contract OpenlyGatewayTest is Test {
     string constant MERCHANT_ID_2 = "merchant_456";
     string constant PAYMENT_REF_1 = "payment_123";
     string constant PAYMENT_REF_2 = "payment_456";
-    string constant USER_ID_1 = "user_123";
-    string constant USER_ID_2 = "user_456";
 
     uint256 constant USDC_AMOUNT = 100 * 10 ** 6;
 
     event PaymentReceived(
         string indexed merchantId,
-        string indexed userId,
         string indexed paymentRef,
         uint256 amount,
         address payer,
@@ -47,7 +44,6 @@ contract OpenlyGatewayTest is Test {
 
     event PaymentForwarderDeployed(
         string indexed merchantId,
-        string indexed userId,
         string indexed paymentRef,
         address forwarderAddress,
         uint256 timestamp
@@ -86,21 +82,19 @@ contract OpenlyGatewayTest is Test {
     function testComputeForwarderAddress() public {
         address computed1 = openlyGateway.computeForwarderAddress(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         address computed2 = openlyGateway.computeForwarderAddress(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
 
         console2.log("computed1: ", computed1);
         console2.log("computed2: ", computed2);
         assertEq(computed1, computed2);
+
         address computed3 = openlyGateway.computeForwarderAddress(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_2
         );
         assertTrue(computed1 != computed3);
@@ -110,14 +104,12 @@ contract OpenlyGatewayTest is Test {
     function testDeployForwarder() public {
         address expectedAddress = openlyGateway.computeForwarderAddress(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
 
         vm.expectEmit(true, true, false, true);
         emit PaymentForwarderDeployed(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             expectedAddress,
             block.timestamp
@@ -125,7 +117,6 @@ contract OpenlyGatewayTest is Test {
 
         address deployed = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         console2.log("deployed: ", deployed.code.length);
@@ -135,15 +126,14 @@ contract OpenlyGatewayTest is Test {
     }
 
     function testConnectDeployForwarderTwice() public {
-        openlyGateway.deployForwarder(MERCHANT_ID_1, USER_ID_1, PAYMENT_REF_1);
+        openlyGateway.deployForwarder(MERCHANT_ID_1, PAYMENT_REF_1);
         vm.expectRevert();
-        openlyGateway.deployForwarder(MERCHANT_ID_1, USER_ID_1, PAYMENT_REF_1);
+        openlyGateway.deployForwarder(MERCHANT_ID_1, PAYMENT_REF_1);
     }
 
     function testCompletePaymentFlow() public {
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
 
@@ -155,7 +145,6 @@ contract OpenlyGatewayTest is Test {
         vm.expectEmit(true, true, false, true);
         emit PaymentReceived(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT,
             forwarder,
@@ -164,7 +153,6 @@ contract OpenlyGatewayTest is Test {
 
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
@@ -177,14 +165,12 @@ contract OpenlyGatewayTest is Test {
     function testWithdrawForMerchant() public {
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         vm.startPrank(customer);
         usdc.transfer(forwarder, USDC_AMOUNT);
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
@@ -226,14 +212,12 @@ contract OpenlyGatewayTest is Test {
     function testWithdrawFailsBelowMinimum() public {
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         vm.prank(customer);
         usdc.transfer(forwarder, USDC_AMOUNT);
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
@@ -250,12 +234,10 @@ contract OpenlyGatewayTest is Test {
     function testBatchWithdraw() public {
         address forwarder1 = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         address forwarder2 = openlyGateway.deployForwarder(
             MERCHANT_ID_2,
-            USER_ID_2,
             PAYMENT_REF_2
         );
 
@@ -266,13 +248,11 @@ contract OpenlyGatewayTest is Test {
 
         PaymentForwarder(forwarder1).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
         PaymentForwarder(forwarder2).forward(
             MERCHANT_ID_2,
-            USER_ID_2,
             PAYMENT_REF_2,
             USDC_AMOUNT * 2
         );
@@ -280,10 +260,6 @@ contract OpenlyGatewayTest is Test {
         string[] memory merchantIds = new string[](2);
         merchantIds[0] = MERCHANT_ID_1;
         merchantIds[1] = MERCHANT_ID_2;
-
-        string[] memory userIds = new string[](2);
-        userIds[0] = USER_ID_1;
-        userIds[1] = USER_ID_2;
 
         address[] memory recipients = new address[](2);
         recipients[0] = merchant1;
@@ -301,23 +277,29 @@ contract OpenlyGatewayTest is Test {
     }
 
     function testOnlyOperatorCanWithdraw() public {
+        // Setup payment so there IS a balance to withdraw (otherwise it might revert for insufficient balance instead of role)
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         vm.prank(customer);
         usdc.transfer(forwarder, USDC_AMOUNT);
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
 
+        // Try to withdraw as a non-operator
         vm.prank(address(999));
+
+        // This should fail because of AccessControl
         vm.expectRevert();
-        openlyGateway.deployForwarder(MERCHANT_ID_1, USER_ID_1, PAYMENT_REF_1);
+        openlyGateway.withdrawForMerchant(
+            MERCHANT_ID_1,
+            merchant1,
+            USDC_AMOUNT
+        );
     }
 
     function testUnpause() public {
@@ -326,7 +308,7 @@ contract OpenlyGatewayTest is Test {
         vm.prank(admin);
         openlyGateway.unpause();
 
-        openlyGateway.deployForwarder(MERCHANT_ID_1, USER_ID_1, PAYMENT_REF_1);
+        openlyGateway.deployForwarder(MERCHANT_ID_1, PAYMENT_REF_1);
     }
 
     function testUpdateMinWithdrawal() public {
@@ -341,7 +323,6 @@ contract OpenlyGatewayTest is Test {
     function testCannotProcessSamePaymentTwice() public {
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         vm.prank(customer);
@@ -350,7 +331,6 @@ contract OpenlyGatewayTest is Test {
 
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
@@ -358,7 +338,6 @@ contract OpenlyGatewayTest is Test {
         vm.expectRevert("Payment already processed");
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
@@ -367,12 +346,10 @@ contract OpenlyGatewayTest is Test {
     function testMultiplePaymentsSameMerchant() public {
         address forwarder1 = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         address forwarder2 = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_2
         );
 
@@ -385,13 +362,11 @@ contract OpenlyGatewayTest is Test {
 
         PaymentForwarder(forwarder1).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             USDC_AMOUNT
         );
         PaymentForwarder(forwarder2).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_2,
             USDC_AMOUNT
         );
@@ -407,7 +382,6 @@ contract OpenlyGatewayTest is Test {
 
         address forwarder = openlyGateway.deployForwarder(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1
         );
         usdc.mint(customer, amount);
@@ -417,7 +391,6 @@ contract OpenlyGatewayTest is Test {
 
         PaymentForwarder(forwarder).forward(
             MERCHANT_ID_1,
-            USER_ID_1,
             PAYMENT_REF_1,
             amount
         );
