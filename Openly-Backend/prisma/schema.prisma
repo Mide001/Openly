@@ -20,6 +20,7 @@ model Merchant {
 
   businessName  String
   businessEmail String  @unique
+  passwordHash  String
   businessType  String? // "sole_proprietor", "llc", "corporation", etc.
   country       String // ISO country code (NG, KE, GH, etc...)
 
@@ -36,8 +37,12 @@ model Merchant {
 
   usdcBalance Decimal @default(0) @db.Decimal(18, 6)
 
-  status          MerchantStatus @default(PENDING)
-  isEmailVerified Boolean        @default(false)
+  status                 MerchantStatus @default(PENDING)
+  isActive               Boolean        @default(true)
+  isEmailVerified        Boolean        @default(false)
+  emailVerificationToken String?
+  passwordResetToken     String?
+  passwordResetExpires   DateTime?
 
   kybStatus          KYBStatus @default(NOT_STARTED)
   kybSubmittedAt     DateTime?
