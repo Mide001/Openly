@@ -1,0 +1,389 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// MERCHANT MANAGEMENT
+
+model Merchant {
+  id String @id @default(uuid())
+
+  businessName  String
+  businessEmail String  @unique
+  businessType  String? // "sole_proprietor", "llc", "corporation", etc.
+  country       String // ISO country code (NG, KE, GH, etc...)
+
+  firstName   String?
+  lastName    String?
+  phoneNumber String?
+
+  walletAddress String // Where their payouts would be sent to
+
+  apiKey        String  @unique
+  apiKeyHash    String // Hashed version for security
+  webhookUrl    String?
+  webhookSecret String? // For webhook signature verification
+
+  usdcBalance Decimal @default(0) @db.Decimal(18, 6)
+
+  status          MerchantStatus @default(PENDING)
+  isEmailVerified Boolean        @default(false)
+
+  kybStatus          KYBStatus @default(NOT_STARTED)
+  kybSubmittedAt     DateTime?
+  kybVerifiedAt      DateTime?
+  kybRejectedAt      DateTime?
+  kybRejectionReason String?
+  smileIdJobId       String?   @unique // SmileID job reference
+  smileIdResult      Json? // Store full SmileID response
+
+  businessRegistrationNumber String?
+  taxIdentificationNumber    String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+
+  payments              Payment[]
+  payouts               Payout[]
+  activityLogs          ActivityLog[]
+  verificationDocuments VerificationDocument[]
+  webhookLogs           WebhookLog[]
+  customers             Customer[]
+
+  @@index([businessEmail])
+  @@index([status])
+  @@index([kybStatus])
+  @@index([createdAt])
+  @@index([apiKey])
+}
+
+enum MerchantStatus {
+  PENDING // Just signed up, email not verified
+  ACTIVE // Verified and can accept payments
+  SUSPENDED // Temporarily disabled by admin
+  REJECTED // KYB failed, cannot use platform
+  INCOMPLETE // Missing required info
+}
+
+enum KYBStatus {
+  NOT_STARTED // Haven't submitted documents yet
+  PENDING // Documents submitted, waiting for SmileID
+  UNDER_REVIEW // SmileID is reviewing
+  VERIFIED // Successfully verified
+  REJECTED // Verification failed
+  RESUBMIT // Need to resubmit documents
+}
+
+// VERIFICATION DOCUMENTS (For SmileID)
+
+model VerificationDocument {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  documentType DocumentType
+  documentUrl  String // S3/storage URL
+  fileName     String
+  fileSize     Int
+  mimeType     String // Fixed typo: was "mineType"
+
+  smileIdDocId String? @unique
+
+  status          DocumentStatus @default(PENDING)
+  uploadedAt      DateTime       @default(now())
+  verifiedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  @@index([merchantId])
+  @@index([status])
+}
+
+enum DocumentType {
+  BUSINESS_REGISTRATION // CAC, Business License
+  TAX_CERTIFICATE // TIN Certificate
+  PROOF_OF_ADDRESS // Utility bill, bank statement
+  ID_CARD // Director's ID
+  BANK_STATEMENT // Optional
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// CUSTOMERS (For Compliance Tracking)
+
+model Customer {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  externalCustomerId String? // Merchant's internal ID
+
+  firstName   String?
+  lastName    String?
+  email       String?
+  phoneNumber String?
+  country     String?
+
+  bvn                   String? // Bank Verification Number
+  nationalId            String? // National ID number
+  nationalIdType        String? // "NIN", "VOTERS_CARD", "DRIVERS_LICENSE"
+  passportNumber        String?
+  taxId                 String?
+  smileIdVerificationId String? // If merchant pre-verified via SmileID
+
+  normalizedUserId String? @db.Text
+
+  riskScore       Decimal? @db.Decimal(5, 2)
+  flaggedForFraud Boolean  @default(false)
+  flaggedReason   String?
+
+  totalPayments  Int       @default(0)
+  totalAmount    Decimal   @default(0) @db.Decimal(18, 6)
+  firstPaymentAt DateTime?
+  lastPaymentAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([merchantId, externalCustomerId]) // Prevent duplicate customer IDs per merchant
+  @@index([merchantId])
+  @@index([normalizedUserId])
+  @@index([bvn])
+  @@index([nationalId])
+  @@index([email])
+  @@index([smileIdVerificationId])
+  @@index([flaggedForFraud])
+}
+
+// PAYMENTS
+
+model Payment {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  paymentRef String @unique // Your internal reference
+
+  amountExpected Decimal  @db.Decimal(18, 6)
+  amountPaid     Decimal? @db.Decimal(18, 6)
+  currency       String   @default("USDC")
+
+  paymentAddress    String // CREATE2: computeForwarderAddress(merchantId, paymentRef)
+  forwarderDeployed Boolean @default(false)
+  txHash            String? @unique
+  blockNumber       Int?
+  gasUsed           String?
+
+  status PaymentStatus @default(PENDING)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  metadata Json? // Merchant's custom data
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime? // When payment was confirmed on-chain
+
+  webhookSent   Boolean      @default(false)
+  webhookSentAt DateTime?
+  webhookLogs   WebhookLog[]
+
+  @@unique([merchantId, paymentRef]) // Matches contract
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([paymentRef])
+  @@index([status])
+  @@index([createdAt])
+  @@index([txHash])
+  @@index([paymentAddress])
+}
+
+enum PaymentStatus {
+  PENDING // Waiting for customer to pay
+  CONFIRMING // Tx seen on blockchain, waiting for confirmations
+  COMPLETED // Payment confirmed and processed
+  EXPIRED // Payment link expired (optional, not enforced by contract)
+  CANCELLED // Cancelled by merchant
+  FAILED // Payment failed (rare)
+}
+
+// PAYOUTS / WITHDRAWALS
+
+model Payout {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  amount Decimal @db.Decimal(18, 6)
+
+  walletAddress String
+
+  txHash      String?      @unique
+  blockNumber Int?
+  gasUsed     String?
+  status      PayoutStatus @default(PENDING)
+
+  processedBy   String? // Admin user ID who processed
+  failureReason String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  processedAt DateTime?
+  completedAt DateTime?
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum PayoutStatus {
+  PENDING // Requested by merchant
+  PROCESSING // Admin is processing
+  SUBMITTED // Tx submitted to blockchain
+  COMPLETED // Confirmed on blockchain
+  FAILED // Failed (retry possible)
+  CANCELLED // Cancelled by admin
+}
+
+// WEBHOOKS
+
+model WebhookLog {
+  id         String   @id @default(uuid())
+  merchantId String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  eventType String // "payment.completed", "payment.failed", "payout.completed"
+  url       String // Webhook URL at time of sending
+  payload   Json
+
+  statusCode Int?
+  response   String? @db.Text
+  success    Boolean @default(false)
+
+  attempts      Int       @default(1)
+  lastAttemptAt DateTime  @default(now())
+  nextRetryAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([merchantId])
+  @@index([paymentId])
+  @@index([success])
+  @@index([nextRetryAt])
+}
+
+// ACTIVITY LOGS
+
+model ActivityLog {
+  id String @id @default(uuid())
+
+  merchantId String?
+  merchant   Merchant? @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  adminId    String? // If action by admin
+
+  type     LogType
+  severity LogSeverity
+  message  String      @db.Text
+
+  metadata  Json? // txHash, paymentRef, error stack, IP address, etc.
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([merchantId])
+  @@index([type])
+  @@index([severity])
+  @@index([createdAt])
+}
+
+enum LogType {
+  PAYMENT
+  PAYOUT
+  KYB
+  AUTH
+  API
+  WEBHOOK
+  ADMIN
+  SYSTEM
+  ERROR
+}
+
+enum LogSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+// ADMIN USERS
+
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         AdminRole @default(OPERATOR)
+
+  lastLoginAt DateTime?
+  lastLoginIp String?
+  isActive    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+enum AdminRole {
+  SUPER_ADMIN // Can do everything
+  ADMIN // Can approve merchants, process payouts
+  OPERATOR // Can process payouts only
+  SUPPORT // Read-only access
+}
+
+// PLATFORM SETTINGS (For SmileID config, etc.)
+
+model PlatformSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   @db.Text
+  encrypted Boolean  @default(false) // For API keys
+  updatedAt DateTime @updatedAt
+  updatedBy String? // Admin user ID
+
+  @@index([key])
+}
+
+// Example settings:
+// - SMILE_ID_PARTNER_ID
+// - SMILE_ID_API_KEY (encrypted)
+// - SMILE_ID_CALLBACK_URL
+// - MIN_WITHDRAWAL_AMOUNT
+// - PAYMENT_EXPIRY_MINUTES
+// - WEBHOOK_RETRY_ATTEMPTS
