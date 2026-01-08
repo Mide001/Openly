@@ -71,6 +71,7 @@ export class OpenlyGatewayService {
             args: [merchant.id, paymentRef]
         });
 
+
         await this.telegram.sendMessage(`<b>New Payment Initiated</b>\n\n` + `Merchant: ${merchant.businessName}\n` + `Ref: ${paymentRef}\n` + `Expected: ${amount} USDC`);
         await this.activityLog.log("PAYMENT", `Payment initiated for ${paymentRef}`, "INFO", { amount, paymentRef }, merchant.id);
 
@@ -79,9 +80,9 @@ export class OpenlyGatewayService {
         if (customerData) {
             const customer = await this.prisma.customer.upsert({
                 where: {
-                    merchantId_externalCustomerId: {
+                    merchantId_email: {
                         merchantId: merchant.id,
-                        externalCustomerId: customerData.externalCustomerId || "unknown"
+                        email: customerData.email
                     }
                 },
                 update: {
@@ -89,7 +90,6 @@ export class OpenlyGatewayService {
                     lastName: customerData.lastName,
                     email: customerData.email,
                     phoneNumber: customerData.phoneNumber,
-                    externalCustomerId: customerData.externalCustomerId
                 },
                 create: {
                     merchantId: merchant.id,
@@ -97,7 +97,6 @@ export class OpenlyGatewayService {
                     lastName: customerData.lastName,
                     email: customerData.email,
                     phoneNumber: customerData.phoneNumber,
-                    externalCustomerId: customerData.externalCustomerId || "unknown"
                 }
             });
             customerId = customer.id;
@@ -209,6 +208,27 @@ export class OpenlyGatewayService {
                 gasUsed: gasUsed
             }
         });
+
+        // Update Customer Metrics
+        if (payment.customerId) {
+            await this.prisma.customer.update({
+                where: { id: payment.customerId },
+                data: {
+                    totalPayments: { increment: 1 },
+                    totalAmount: { increment: formattedAmount },
+                    lastPaymentAt: new Date(),
+                }
+            });
+
+            // Set firstPaymentAt if not set
+            const cust = await this.prisma.customer.findUnique({ where: { id: payment.customerId } });
+            if (cust && !cust.firstPaymentAt) {
+                await this.prisma.customer.update({
+                    where: { id: payment.customerId },
+                    data: { firstPaymentAt: new Date() }
+                });
+            }
+        }
 
         this.sendWebhook(merchantId, {
             event: "payment.detected",

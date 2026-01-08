@@ -137,11 +137,9 @@ model Customer {
   merchantId String
   merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
-  externalCustomerId String? // Merchant's internal ID
-
   firstName   String?
   lastName    String?
-  email       String?
+  email       String
   phoneNumber String?
   country     String?
 
@@ -168,7 +166,7 @@ model Customer {
 
   payments Payment[]
 
-  @@unique([merchantId, externalCustomerId]) // Prevent duplicate customer IDs per merchant
+  @@unique([merchantId, email]) // Prevent duplicate emails per merchant
   @@index([merchantId])
   @@index([normalizedUserId])
   @@index([bvn])

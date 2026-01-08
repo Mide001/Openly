@@ -4,19 +4,15 @@ import { Type } from "class-transformer";
 export class CustomerDto {
     @IsOptional()
     @IsString()
-    externalCustomerId?: string;
-
-    @IsOptional()
-    @IsString()
     firstName?: string;
 
     @IsOptional()
     @IsString()
     lastName?: string;
 
-    @IsOptional()
+    @IsNotEmpty()
     @IsString()
-    email?: string;
+    email: string;
 
     @IsOptional()
     @IsString()
