@@ -51,7 +51,7 @@ export class OpenlyGatewayService {
     }
 
 
-    async initializePayment(apiKey: string, paymentRef: string, amount: number) {
+    async initializePayment(apiKey: string, paymentRef: string, amount: number, customerData?: any, metadata?: any) {
         const merchant = await this.prisma.merchant.findUnique({
             where: { apiKey }
         });
@@ -75,13 +75,44 @@ export class OpenlyGatewayService {
         await this.activityLog.log("PAYMENT", `Payment initiated for ${paymentRef}`, "INFO", { amount, paymentRef }, merchant.id);
 
 
+        let customerId: string | null = null;
+        if (customerData) {
+            const customer = await this.prisma.customer.upsert({
+                where: {
+                    merchantId_externalCustomerId: {
+                        merchantId: merchant.id,
+                        externalCustomerId: customerData.externalCustomerId || "unknown"
+                    }
+                },
+                update: {
+                    firstName: customerData.firstName,
+                    lastName: customerData.lastName,
+                    email: customerData.email,
+                    phoneNumber: customerData.phoneNumber,
+                    externalCustomerId: customerData.externalCustomerId
+                },
+                create: {
+                    merchantId: merchant.id,
+                    firstName: customerData.firstName,
+                    lastName: customerData.lastName,
+                    email: customerData.email,
+                    phoneNumber: customerData.phoneNumber,
+                    externalCustomerId: customerData.externalCustomerId || "unknown"
+                }
+            });
+            customerId = customer.id;
+        }
+
+
         return await this.prisma.payment.create({
             data: {
                 merchantId: merchant.id,
                 paymentRef,
                 amountExpected: amount,
                 paymentAddress: paymentAddress,
-                status: "PENDING"
+                status: "PENDING",
+                customerId: customerId,
+                metadata: metadata || {}
             }
         });
     }
@@ -141,7 +172,7 @@ export class OpenlyGatewayService {
         }
     }
 
-    async handlePaymentDetected(merchantId: string, paymentRef: string, amount: bigint, txHash: string) {
+    async handlePaymentDetected(merchantId: string, paymentRef: string, amount: bigint, txHash: string, blockNumber?: bigint) {
         const formattedAmount = Number(formatUnits(amount, 6));
         const merchant = await this.prisma.merchant.findUnique({
             where: {
@@ -160,12 +191,22 @@ export class OpenlyGatewayService {
 
         if (!payment || payment.status !== "PENDING") return;
 
+        let gasUsed = null;
+        try {
+            const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+            gasUsed = receipt.gasUsed.toString();
+        } catch (e) {
+            this.logger.warn('Could not fetch receipt for ' + txHash);
+        }
+
         await this.prisma.payment.update({
             where: { id: payment.id },
             data: {
                 status: "CONFIRMING",
                 amountPaid: formattedAmount,
-                txHash
+                txHash,
+                blockNumber: blockNumber ? Number(blockNumber) : undefined,
+                gasUsed: gasUsed
             }
         });
 
@@ -176,9 +217,10 @@ export class OpenlyGatewayService {
 
         await this.activityLog.log("PAYMENT", `Payment detected for ${paymentRef}`, "INFO", { amount: formattedAmount, txHash }, merchantId);
 
-        this.flushPayment(merchantId, paymentRef, amount);
+        // Directly call flushPayment without passing known address, forcing RPC re-computation
+        await this.flushPayment(merchantId, paymentRef, amount);
 
-        await this.telegram.sendMessage(`<b>Payment Detected!</b>\n\n` + `Merchant: ${merchant?.businessName}\n` + `Ref: ${paymentRef}` + `Amount: ${formattedAmount} USDC\n` + `Tx: <a href="https://sepolia.basescan.org/tx/${txHash}>Check Blockscan</a>`)
+        await this.telegram.sendMessage(`<b>Payment Detected!</b>\n\n` + `Merchant: ${merchant?.businessName}\n` + `Ref: ${paymentRef}\n` + `Amount: ${formattedAmount} USDC\n` + `Tx: <a href="https://sepolia.basescan.org/tx/${txHash}">Check Blockscan</a>`)
     }
 
 
@@ -196,11 +238,9 @@ export class OpenlyGatewayService {
                 args: [merchantId, paymentRef]
             });
 
-
-            const code = await this.publicClient.getByteCode({
+            const code = await this.publicClient.getBytecode({
                 address: forwarderAddress
             });
-
             if (!code || code === "0x") {
                 this.logger.log(`Deploying forwarder for ${paymentRef}`);
 
@@ -216,7 +256,7 @@ export class OpenlyGatewayService {
                         hash: deployHash
                     });
                 } catch (deployError: any) {
-                    const checkCode = await this.publicClient.getByteCode({
+                    const checkCode = await this.publicClient.getBytecode({
                         address: forwarderAddress
                     });
                     if (checkCode && checkCode !== "0x") {
@@ -249,5 +289,12 @@ export class OpenlyGatewayService {
             );
             await this.activityLog.log("ERROR", `Flush failed for ${paymentRef}`, "ERROR", { error: error.message }, merchantId);
         }
+    }
+    async getUsdcTokenAddress() {
+        return await this.publicClient.readContract({
+            address: this.openlyGatewayAddress,
+            abi: GATEWAY_ABI,
+            functionName: 'usdcToken'
+        });
     }
 }

@@ -20,7 +20,7 @@ export class CustomerDto {
 
     @IsOptional()
     @IsString()
-    phone?: string;
+    phoneNumber?: string;
 }
 
 export class InitializePaymentDto {

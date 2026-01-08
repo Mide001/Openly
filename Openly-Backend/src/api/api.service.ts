@@ -11,7 +11,7 @@ export class ApiService {
     async initializePayment(apiKey: string, dto: InitializePaymentDto) {
         if (!apiKey) throw new UnauthorizedException("Missing API Key");
 
-        const payment = await this.openlyGateway.initializePayment(apiKey, dto.paymentRef, dto.amount);
+        const payment = await this.openlyGateway.initializePayment(apiKey, dto.paymentRef, dto.amount, dto.customer, dto.metadata);
 
         return {
             status: "success",
