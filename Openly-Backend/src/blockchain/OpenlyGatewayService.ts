@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import { Injectable, Logger, BadRequestException, ConflictException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "@/common/prisma/prisma.service";
 import { HttpService } from "@nestjs/axios";
@@ -61,6 +61,9 @@ export class OpenlyGatewayService {
             where: { merchantId_paymentRef: { merchantId: merchant.id, paymentRef } }
         });
         if (existing) {
+            if (existing.status === "COMPLETED" || existing.status === "CONFIRMING") {
+                throw new ConflictException(`Payment ${paymentRef} has already been processed.`);
+            }
             return { ...existing, paymentAddress: existing.paymentAddress };
         }
 
