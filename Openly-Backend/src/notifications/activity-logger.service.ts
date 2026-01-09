@@ -7,8 +7,9 @@ export class ActivityLoggerService {
     constructor(private prisma: PrismaService) { }
 
     async log(type: string, message: string, severity: string, metadata?: any, merchantId?: string) {
-        const safeType = LogType[type] || LogType.SYSTEM;
-        const safeSeverity = LogSeverity[severity] || LogSeverity.INFO;
+        // Normalize to uppercase to ensure matching with Prisma Enum
+        const safeType = LogType[type.toUpperCase()] || LogType.SYSTEM;
+        const safeSeverity = LogSeverity[severity.toUpperCase()] || LogSeverity.INFO;
 
         await this.prisma.activityLog.create({
             data: {
