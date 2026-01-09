@@ -40,15 +40,13 @@ export class OpenlySettlementService {
             });
 
             this.logger.log(`Batch Settlement: ${hash}`);
-            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
+
+            // 1. Create Payouts IMMEDIATELY (Status: PENDING)
+            // 2. Deduct Balance IMMEDIATELY
             await this.prisma.$transaction([
                 this.prisma.merchant.updateMany({
-                    where: {
-                        id: { in: merchantIds }
-                    },
-                    data: {
-                        usdcBalance: 0
-                    }
+                    where: { id: { in: merchantIds } },
+                    data: { usdcBalance: 0 }
                 }),
                 this.prisma.payout.createMany({
                     data: merchants.map(m => ({
@@ -56,10 +54,19 @@ export class OpenlySettlementService {
                         amount: m.usdcBalance,
                         txHash: hash,
                         walletAddress: m.walletAddress,
-                        status: "COMPLETED"
+                        status: "PENDING"
                     }))
                 })
             ]);
+
+            // 3. Wait for confirmation
+            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
+
+            // 4. Update status to COMPLETED
+            await this.prisma.payout.updateMany({
+                where: { txHash: hash },
+                data: { status: "COMPLETED" }
+            });
 
             await this.activityLog.log("PAYOUT", `Settled ${merchantIds.length} merchants`, "SUCCESS", { txHash: hash, count: merchants.length });
         } catch (error: any) {
@@ -107,16 +114,23 @@ export class OpenlySettlementService {
                 args: [merchantInfo.id, recipient, amountBigInt]
             });
 
-            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
-
+            // Create Payout IMMEDIATELY (PENDING)
             await this.prisma.payout.create({
                 data: {
                     merchantId: merchantInfo.id,
                     amount: amount,
                     txHash: hash,
                     walletAddress: merchantInfo.walletAddress,
-                    status: "COMPLETED"
+                    status: "PENDING"
                 }
+            });
+
+            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
+
+            // Update to COMPLETED
+            await this.prisma.payout.updateMany({
+                where: { txHash: hash },
+                data: { status: "COMPLETED" }
             });
 
 
