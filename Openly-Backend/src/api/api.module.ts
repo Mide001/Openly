@@ -11,10 +11,12 @@ import { HttpModule } from "@nestjs/axios";
 import { ConfigModule } from "@nestjs/config";
 
 
+import { BlockchainModule } from "@/blockchain/blockchain.module";
+
 @Module({
-    imports: [PrismaModule, HttpModule, ConfigModule],
+    imports: [PrismaModule, HttpModule, ConfigModule, BlockchainModule],
     controllers: [ApiController],
-    providers: [ApiService, ApiKeyGuard, OpenlyGatewayService, OpenlySettlementService, TelegramService, ActivityLoggerService],
+    providers: [ApiService, ApiKeyGuard],
     exports: []
 })
 
