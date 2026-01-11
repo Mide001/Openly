@@ -3,7 +3,7 @@ import { ApiService } from "./api.service";
 import { ApiKeyGuard } from "./guards/api-key.guard";
 import { InitializePaymentDto, RequestPayoutDto } from "./dto/api.dto";
 
-@Controller("api/v1")
+@Controller("")
 export class ApiController {
     constructor(private apiService: ApiService) { }
 
@@ -25,9 +25,9 @@ export class ApiController {
         return this.apiService.requestPayout(apiKey, body);
     }
 
-    @Post("payouts")
+    @Get("payouts")
     @UseGuards(ApiKeyGuard)
-    async getPayoutHistory(@Headers('x-api-key') apiKey: string) {
-        return this.apiService.getPayoutHistory(apiKey);
+    async getPayouts(@Headers('x-api-key') apiKey: string) {
+        return this.apiService.getPayouts(apiKey);
     }
 }

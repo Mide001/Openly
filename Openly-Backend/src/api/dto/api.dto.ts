@@ -36,6 +36,10 @@ export class InitializePaymentDto {
     @IsOptional()
     @IsObject()
     metadata?: any;
+
+    @IsOptional()
+    @IsString()
+    network?: 'TESTNET' | 'MAINNET';
 }
 
 export class RequestPayoutDto {
@@ -46,6 +50,10 @@ export class RequestPayoutDto {
     @IsOptional()
     @IsString()
     walletAddress?: string;
+
+    @IsOptional()
+    @IsString()
+    network?: 'TESTNET' | 'MAINNET';
 }
 
 export class ConfigureWebhookDto {
