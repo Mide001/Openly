@@ -5,7 +5,7 @@ import { OpenlyGatewayService, GATEWAY_ABI } from "./OpenlyGatewayService";
 import { parseUnits } from "viem";
 import { TelegramService } from "@/notifications/telegram.service";
 import { ActivityLoggerService } from "@/notifications/activity-logger.service";
-
+import { createHash } from "crypto";
 
 
 @Injectable()
@@ -30,10 +30,20 @@ export class OpenlySettlementService {
         const recipients = merchants.map(m => m.walletAddress as `0x${string}`);
         const amounts = merchants.map(m => parseUnits(m.usdcBalance.toFixed(6), 6));
 
+        // TODO: Handle Mainnet settlement. For now, defaulting to Testnet to preserve legacy behavior.
+        const walletClient = this.openlyGateway.walletClientTest;
+        const publicClient = this.openlyGateway.publicClientTest;
+        const address = this.openlyGateway.addressTest;
+
+        if (!walletClient) {
+            this.logger.warn("Skipping daily settlement: No Testnet Wallet Client available.");
+            return;
+        }
+
         try {
-            this.logger.log(`Settling ${merchants.length} merchants...`);
-            const hash = await this.openlyGateway.walletClient.writeContract({
-                address: this.openlyGateway.openlyGatewayAddress,
+            this.logger.log(`Settling ${merchants.length} merchants on Testnet...`);
+            const hash = await walletClient.writeContract({
+                address: address,
                 abi: GATEWAY_ABI,
                 functionName: "batchWithdraw",
                 args: [merchantIds, recipients, amounts]
@@ -41,8 +51,6 @@ export class OpenlySettlementService {
 
             this.logger.log(`Batch Settlement: ${hash}`);
 
-            // 1. Create Payouts IMMEDIATELY (Status: PENDING)
-            // 2. Deduct Balance IMMEDIATELY
             await this.prisma.$transaction([
                 this.prisma.merchant.updateMany({
                     where: { id: { in: merchantIds } },
@@ -59,10 +67,8 @@ export class OpenlySettlementService {
                 })
             ]);
 
-            // 3. Wait for confirmation
-            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
+            await publicClient.waitForTransactionReceipt({ hash });
 
-            // 4. Update status to COMPLETED
             await this.prisma.payout.updateMany({
                 where: { txHash: hash },
                 data: { status: "COMPLETED" }
@@ -75,25 +81,39 @@ export class OpenlySettlementService {
         }
     }
 
-    async manualSettlement(apiKey: string, amount: number) {
+    // UPDATED: Accepts network
+    async manualSettlement(apiKey: string, amount: number, network: 'TESTNET' | 'MAINNET' = 'TESTNET') {
+        const hashedKey = createHash('sha256').update(apiKey).digest('hex');
+
         const merchantInfo = await this.prisma.merchant.findUnique({
-            where: { apiKey }
+            where: { apiKeyHash: hashedKey }
         });
 
         if (!merchantInfo) throw new BadRequestException("Invalid API KEY");
+
+        // Select context based on Network param
+        const ctx = network === 'TESTNET' ? {
+            type: 'TESTNET',
+            wallet: this.openlyGateway.walletClientTest,
+            public: this.openlyGateway.publicClientTest,
+            address: this.openlyGateway.addressTest
+        } : {
+            type: 'MAINNET',
+            wallet: this.openlyGateway.walletClientMain,
+            public: this.openlyGateway.publicClientMain,
+            address: this.openlyGateway.addressMain
+        };
+
+        if (!ctx.wallet) throw new Error(`No Wallet Client available for ${ctx.type}`);
 
         try {
             await this.prisma.merchant.update({
                 where: {
                     id: merchantInfo.id,
-                    usdcBalance: {
-                        gte: amount
-                    }
+                    usdcBalance: { gte: amount }
                 },
                 data: {
-                    usdcBalance: {
-                        decrement: amount
-                    }
+                    usdcBalance: { decrement: amount }
                 }
             });
         } catch (error: any) {
@@ -105,16 +125,16 @@ export class OpenlySettlementService {
         const recipient = merchantInfo.walletAddress as `0x${string}`;
 
         try {
-            this.logger.log(`Manual withdrawal for ${merchantInfo.businessName}: ${amount} USDC`);
-            await this.telegram.sendMessage(`${merchantInfo.businessName} has requested a manual withdrawal of ${amount} USDC`);
-            const hash = await this.openlyGateway.walletClient.writeContract({
-                address: this.openlyGateway.openlyGatewayAddress,
+            this.logger.log(`Manual withdrawal for ${merchantInfo.businessName}: ${amount} USDC on ${ctx.type}`);
+            await this.telegram.sendMessage(`${merchantInfo.businessName} has requested a manual withdrawal of ${amount} USDC on ${ctx.type}`);
+
+            const hash = await ctx.wallet.writeContract({
+                address: ctx.address,
                 abi: GATEWAY_ABI,
                 functionName: "withdrawForMerchant",
                 args: [merchantInfo.id, recipient, amountBigInt]
             });
 
-            // Create Payout IMMEDIATELY (PENDING)
             await this.prisma.payout.create({
                 data: {
                     merchantId: merchantInfo.id,
@@ -125,42 +145,43 @@ export class OpenlySettlementService {
                 }
             });
 
-            await this.openlyGateway.publicClient.waitForTransactionReceipt({ hash });
+            await ctx.public.waitForTransactionReceipt({ hash });
 
-            // Update to COMPLETED
             await this.prisma.payout.updateMany({
                 where: { txHash: hash },
                 data: { status: "COMPLETED" }
             });
 
-
             await this.telegram.sendMessage(`${merchantInfo.businessName} manual withdrawal of ${amount} USDC completed\nHash: ${hash}`);
 
-            await this.activityLog.log("PAYOUT", `Manual withdrawal of ${amount} USDC`, "SUCCESS", { txHash: hash, amount }, merchantInfo.id);
+            await this.activityLog.log("PAYOUT", `Manual withdrawal of ${amount} USDC`, "SUCCESS", { txHash: hash, amount, network: ctx.type }, merchantInfo.id);
 
             return { txHash: hash, status: "COMPLETED" };
         } catch (error: any) {
             this.logger.error(`Manual withdrawal failed: ${error}. REFUNDING.`);
 
             await this.prisma.merchant.update({
-                where: {
-                    id: merchantInfo.id
-                },
-                data: {
-                    usdcBalance: { increment: amount }
-                }
+                where: { id: merchantInfo.id },
+                data: { usdcBalance: { increment: amount } }
             });
 
             await this.telegram.sendMessage(`${merchantInfo.businessName} manual withdrawal failed - Refunded. Error: ${error}`);
-            // Also log the error to activity log
             await this.activityLog.log("ERROR", `Manual withdrawal failed - Refunded`, "ERROR", { error: error.message }, merchantInfo.id);
             throw error;
         }
     }
 
     async getPayouts(apiKey: string) {
+        const hashedKey = createHash('sha256').update(apiKey).digest('hex');
+
+        const merchant = await this.prisma.merchant.findUnique({
+            where: { apiKeyHash: hashedKey }
+        });
+
+        if (!merchant) throw new BadRequestException("Invalid API Key");
+
         return await this.prisma.payout.findMany({
-            where: { merchant: { apiKey } },
+            where: { merchantId: merchant.id },
             orderBy: { createdAt: "desc" },
             take: 20
         });
