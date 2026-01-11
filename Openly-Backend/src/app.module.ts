@@ -5,6 +5,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ApiModule } from './api/api.module';
 import { JobsModule } from './jobs/jobs.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -15,7 +16,9 @@ import { ScheduleModule } from '@nestjs/schedule';
     PrismaModule,
     AuthModule,
     ApiModule,
-    JobsModule
+    ApiModule,
+    JobsModule,
+    AdminModule
   ],
   controllers: [],
   providers: [],

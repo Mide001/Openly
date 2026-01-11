@@ -2,7 +2,6 @@ import { Controller, Post, Body, Headers, UnauthorizedException } from "@nestjs/
 import { AdminAuthService } from "./admin-auth.service";
 import { LoginAdminDto } from "./dto/admin-auth.dto";
 
-
 @Controller('admin/auth')
 export class AdminAuthController {
     constructor(private readonly authService: AdminAuthService) { }
