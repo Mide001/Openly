@@ -6,15 +6,14 @@ import { TelegramService } from "@/notifications/telegram.service";
 import { ActivityLoggerService } from "@/notifications/activity-logger.service";
 import { HttpModule } from "@nestjs/axios";
 import { ConfigModule } from "@nestjs/config";
+import { NotificationsModule } from "@/notifications/notifications.module";
 
 @Module({
-    imports: [PrismaModule, HttpModule, ConfigModule],
+    imports: [PrismaModule, HttpModule, ConfigModule, NotificationsModule],
     providers: [
         OpenlyGatewayService,
-        OpenlySettlementService,
-        TelegramService,
-        ActivityLoggerService
+        OpenlySettlementService
     ],
-    exports: [OpenlyGatewayService, OpenlySettlementService, TelegramService, ActivityLoggerService]
+    exports: [OpenlyGatewayService, OpenlySettlementService]
 })
 export class BlockchainModule { }

@@ -9,10 +9,12 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AdminService } from './admin.service';
 import { JwtStrategy } from './jwt.strategy';
+import { NotificationsModule } from '@/notifications/notifications.module';
 
 @Module({
     imports: [
         PrismaModule,
+        NotificationsModule,
         PassportModule,
         JwtModule.registerAsync({
             imports: [ConfigModule],
