@@ -151,6 +151,7 @@ export class OpenlyGatewayService {
         const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
         if (merchant) {
             await this.telegram.sendMessage(`<b>[SUCCESS] Payment Confirmed!</b>\n\nMerchant: ${merchant.businessName}\nRef: ${paymentRef}\nAmount: ${formattedAmount} USDC\nTx: ${txHash}`);
+            await this.activityLog.log("PAYMENT", `Payment confirmed for ${paymentRef}`, "SUCCESS", { amount: formattedAmount, txHash }, merchantId);
         }
 
         this.sendWebhook(merchantId, { event: "payment.success", data: { paymentRef, amount: formattedAmount, txHash } });
@@ -186,6 +187,7 @@ export class OpenlyGatewayService {
 
         const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
         await this.telegram.sendMessage(`<b>[DETECTED] Payment Received!</b>\n\nMerchant: ${merchant?.businessName}\nRef: ${paymentRef}\nAmount: ${formattedAmount} USDC\nTx: ${txHash}`);
+        await this.activityLog.log("PAYMENT", `Payment detected on chain`, "INFO", { amount: formattedAmount, txHash, paymentRef }, merchantId);
 
         this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
 

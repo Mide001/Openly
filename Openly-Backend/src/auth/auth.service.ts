@@ -4,6 +4,7 @@ import { RegisterMerchantDto, LoginMerchantDto } from "./dto/auth.dto";
 import * as bcrypt from "bcrypt";
 import { JwtService } from "@nestjs/jwt";
 import { createHash, randomBytes } from "crypto";
+import { ActivityLoggerService } from "@/notifications/activity-logger.service";
 
 // Helper to hash API keys (SHA-256 for deterministic lookup)
 export function hashApiKey(key: string): string {
@@ -12,7 +13,7 @@ export function hashApiKey(key: string): string {
 
 @Injectable()
 export class AuthService {
-    constructor(private prisma: PrismaService, private jwtService: JwtService) { }
+    constructor(private prisma: PrismaService, private jwtService: JwtService, private activityLog: ActivityLoggerService) { }
 
     async register(dto: RegisterMerchantDto) {
         const existing = await this.prisma.merchant.findUnique({
@@ -49,6 +50,8 @@ export class AuthService {
 
         console.log(`[Mock Email] Verify token for ${dto.businessEmail}: ${verifyToken}`);
 
+        await this.activityLog.log("AUTH", `New merchant signed up: ${dto.businessName}`, "INFO", { email: dto.businessEmail }, merchant.id);
+
         return {
             merchantId: merchant.id,
             apiKey: apiKey,
@@ -76,6 +79,8 @@ export class AuthService {
         const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
         const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
 
+        await this.activityLog.log("AUTH", `Merchant logged in`, "INFO", { email: merchant.businessEmail }, merchant.id);
+
         return {
             accessToken,
             refreshToken,
@@ -102,6 +107,8 @@ export class AuthService {
                 emailVerificationToken: null
             }
         });
+
+        await this.activityLog.log("AUTH", `Email verified successfully`, "SUCCESS", { email: merchant.businessEmail }, merchant.id);
 
         return { message: 'Email verified successfully' };
     }
