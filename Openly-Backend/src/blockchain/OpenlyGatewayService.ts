@@ -148,6 +148,11 @@ export class OpenlyGatewayService {
             await tx.merchant.update({ where: { id: merchantId }, data: { usdcBalance: { increment: formattedAmount } } });
         });
 
+        const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+        if (merchant) {
+            await this.telegram.sendMessage(`<b>[SUCCESS] Payment Confirmed!</b>\n\nMerchant: ${merchant.businessName}\nRef: ${paymentRef}\nAmount: ${formattedAmount} USDC\nTx: ${txHash}`);
+        }
+
         this.sendWebhook(merchantId, { event: "payment.success", data: { paymentRef, amount: formattedAmount, txHash } });
     }
 
@@ -179,11 +184,13 @@ export class OpenlyGatewayService {
             });
         }
 
+        const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+        await this.telegram.sendMessage(`<b>[DETECTED] Payment Received!</b>\n\nMerchant: ${merchant?.businessName}\nRef: ${paymentRef}\nAmount: ${formattedAmount} USDC\nTx: ${txHash}`);
+
         this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
 
-        // Fix: Pass network/context to flush. But wait, flushPayment can now self-resolve from DB.
-        // Just trigger it. The new flushPayment logic reads the DB.
-        const amountBigInt = parseUnits(formattedAmount.toString(), 6); // Re-parsing for type consistency
+        // Trigger Flush
+        const amountBigInt = parseUnits(formattedAmount.toString(), 6);
         await this.flushPayment(merchantId, paymentRef, amountBigInt);
     }
 
