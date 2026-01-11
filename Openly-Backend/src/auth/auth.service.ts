@@ -1,9 +1,14 @@
-import { Injectable, UnauthorizedException, BadRequestException, NotFoundException, ForbiddenException } from "@nestjs/common";
+import { Injectable, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { PrismaService } from "@/common/prisma/prisma.service";
 import { RegisterMerchantDto, LoginMerchantDto } from "./dto/auth.dto";
 import * as bcrypt from "bcrypt";
 import { JwtService } from "@nestjs/jwt";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
+
+// Helper to hash API keys (SHA-256 for deterministic lookup)
+export function hashApiKey(key: string): string {
+    return createHash('sha256').update(key).digest('hex');
+}
 
 @Injectable()
 export class AuthService {
@@ -18,8 +23,11 @@ export class AuthService {
 
         const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-        const apiKey = 'sk_live_' + randomBytes(16).toString('hex');
-        const apiKeyHash = await bcrypt.hash(apiKey, 10);
+        // 1. Generate Single API Key (User sees this ONCE)
+        const apiKey = 'sk_live_' + randomBytes(24).toString('hex');
+
+        // 2. Hash it for storage
+        const keyHash = hashApiKey(apiKey);
 
         const verifyToken = randomBytes(32).toString('hex');
 
@@ -29,8 +37,10 @@ export class AuthService {
                 businessName: dto.businessName,
                 country: dto.country,
                 passwordHash: hashedPassword,
-                apiKey: apiKey,
-                apiKeyHash: apiKeyHash,
+
+                // Store ONLY Hash
+                apiKeyHash: keyHash,
+
                 walletAddress: dto.walletAddress,
                 emailVerificationToken: verifyToken,
                 isEmailVerified: false
@@ -42,7 +52,7 @@ export class AuthService {
         return {
             merchantId: merchant.id,
             apiKey: apiKey,
-            message: 'Please verify your email. (Check server logs for token in dev)',
+            message: 'SAVE THIS KEY! We do not store it. \n\nPlease verify your email. (Check server logs for token in dev)',
         };
     }
 

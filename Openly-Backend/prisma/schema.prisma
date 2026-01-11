@@ -30,8 +30,8 @@ model Merchant {
 
   walletAddress String // Where their payouts would be sent to
 
-  apiKey        String  @unique
-  apiKeyHash    String // Hashed version for security
+  apiKeyHash String @unique // Hashed version of the single access key
+
   webhookUrl    String?
   webhookSecret String? // For webhook signature verification
 
@@ -70,7 +70,7 @@ model Merchant {
   @@index([status])
   @@index([kybStatus])
   @@index([createdAt])
-  @@index([apiKey])
+  @@index([apiKeyHash])
 }
 
 enum MerchantStatus {
@@ -180,6 +180,7 @@ model Customer {
 
 model Payment {
   id         String   @id @default(uuid())
+  network    String   @default("TESTNET")
   merchantId String
   merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
