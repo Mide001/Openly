@@ -31,7 +31,7 @@ export class OpenlySettlementService {
         const amounts = merchants.map(m => parseUnits(m.usdcBalance.toFixed(6), 6));
 
         // TODO: Handle Mainnet settlement. For now, defaulting to Testnet to preserve legacy behavior.
-        const walletClient = this.openlyGateway.walletClientTest;
+        const walletClient = this.openlyGateway.smartClientTest;
         const publicClient = this.openlyGateway.publicClientTest;
         const address = this.openlyGateway.addressTest;
 
@@ -92,12 +92,12 @@ export class OpenlySettlementService {
 
         const ctx = network === 'TESTNET' ? {
             type: 'TESTNET',
-            wallet: this.openlyGateway.walletClientTest,
+            wallet: this.openlyGateway.smartClientTest,
             public: this.openlyGateway.publicClientTest,
             address: this.openlyGateway.addressTest
         } : {
             type: 'MAINNET',
-            wallet: this.openlyGateway.walletClientMain,
+            wallet: this.openlyGateway.smartClientMain,
             public: this.openlyGateway.publicClientMain,
             address: this.openlyGateway.addressMain
         };
