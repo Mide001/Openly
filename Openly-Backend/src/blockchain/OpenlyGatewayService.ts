@@ -2,12 +2,18 @@ import { Injectable, Logger, BadRequestException, ConflictException } from "@nes
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "@/common/prisma/prisma.service";
 import { HttpService } from "@nestjs/axios";
-import { createPublicClient, createWalletClient, http, parseAbi, formatUnits, parseUnits, Address } from "viem";
+import { createPublicClient, http, parseAbi, formatUnits, parseUnits, Address, Hex } from "viem";
 import { baseSepolia, base } from "viem/chains";
 import { TelegramService } from "@/notifications/telegram.service";
 import { ActivityLoggerService } from "@/notifications/activity-logger.service";
 import { privateKeyToAccount } from "viem/accounts";
 import { createHash } from "crypto";
+import { createSmartAccountClient } from "permissionless";
+import { createBundlerClient, createPaymasterClient } from "viem/account-abstraction";
+import { toSimpleSmartAccount } from "permissionless/accounts";
+
+// Standard EntryPoint v0.6 address
+const ENTRYPOINT_ADDRESS_V06 = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789";
 
 export const GATEWAY_ABI = parseAbi([
     'function computeForwarderAddress(string merchantId, string paymentRef) view returns (address)',
@@ -15,6 +21,7 @@ export const GATEWAY_ABI = parseAbi([
     'function usdcToken() view returns (address)',
     'function batchWithdraw(string[] merchantIds, address[] recipients, uint256[] amounts)',
     'function withdrawForMerchant(string merchantId, address recipient, uint256 amount)',
+    'function executeForward(address forwarder, string merchantId, string paymentRef, uint256 amount)',
     'event PaymentReceived(string indexed merchantId, string indexed paymentRef, uint256 amount, address payer, uint256 timestamp)'
 ]);
 const FORWARDER_ABI = parseAbi([
@@ -26,35 +33,93 @@ export class OpenlyGatewayService {
     private readonly logger = new Logger(OpenlyGatewayService.name);
 
     public publicClientTest;
-    public walletClientTest;
-    public accountTest;
-    public addressTest: Address;
-
     public publicClientMain;
-    public walletClientMain;
-    public accountMain;
+    public addressTest: Address;
     public addressMain: Address;
+
+    // Smart Account Clients
+    public smartClientTest;
+    public smartClientMain;
 
     constructor(private config: ConfigService, private prisma: PrismaService, private httpService: HttpService, private telegram: TelegramService, private activityLog: ActivityLoggerService) {
         const rpcTest = this.config.get<string>("RPC_URL_TESTNET") || this.config.get<string>("RPC_URL");
-        const pkTest = this.config.get<string>("PRIVATE_KEY");
-        this.addressTest = (this.config.get<string>("OPENLY_GATEWAY_ADDRESS_TESTNET") || this.config.get<string>("OPENLY_GATEWAY_ADDRESS")) as Address;
-
-        this.publicClientTest = createPublicClient({ chain: baseSepolia, transport: http(rpcTest) });
-        if (pkTest) {
-            this.accountTest = privateKeyToAccount(pkTest as `0x${string}`);
-            this.walletClientTest = createWalletClient({ account: this.accountTest, chain: baseSepolia, transport: http(rpcTest) });
-        }
-
         const rpcMain = this.config.get<string>("RPC_URL_MAINNET") || rpcTest;
-        const pkMain = this.config.get<string>("PRIVATE_KEY_MAINNET") || pkTest;
+        const paymasterRpcTest = this.config.get<string>("PAYMASTER_RPC_URL_TESTNET");
+        const paymasterRpcMain = this.config.get<string>("PAYMASTER_RPC_URL_MAINNET");
+        const pk = this.config.get<string>("PRIVATE_KEY");
+
+        this.addressTest = (this.config.get<string>("OPENLY_GATEWAY_ADDRESS_TESTNET") || this.config.get<string>("OPENLY_GATEWAY_ADDRESS")) as Address;
         this.addressMain = (this.config.get<string>("OPENLY_GATEWAY_ADDRESS_MAINNET") || this.addressTest) as Address;
 
-        this.publicClientMain = createPublicClient({ chain: baseSepolia, transport: http(rpcMain) });
+        this.publicClientTest = createPublicClient({ chain: baseSepolia, transport: http(rpcTest) });
+        this.publicClientMain = createPublicClient({ chain: base, transport: http(rpcMain) });
 
-        if (pkMain) {
-            this.accountMain = privateKeyToAccount(pkMain as `0x${string}`);
-            this.walletClientMain = createWalletClient({ account: this.accountMain, chain: baseSepolia, transport: http(rpcMain) });
+        if (pk) {
+            this.initSmartAccounts(pk as Hex, paymasterRpcTest, paymasterRpcMain);
+        } else {
+            this.logger.warn("Missing PRIVATE_KEY. Smart Accounts cannot be initialized.");
+        }
+    }
+
+    private async initSmartAccounts(pk: Hex, paymasterUrlTest: string | undefined, paymasterUrlMain: string | undefined) {
+        try {
+            const owner = privateKeyToAccount(pk);
+
+            if (paymasterUrlTest) {
+                const accountTest = await toSimpleSmartAccount({
+                    client: this.publicClientTest,
+                    owner: owner,
+                    entryPoint: {
+                        address: ENTRYPOINT_ADDRESS_V06,
+                        version: "0.6"
+                    },
+                    factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454"
+                });
+
+                const paymasterTest = createPaymasterClient({
+                    transport: http(paymasterUrlTest),
+                });
+
+                this.smartClientTest = createSmartAccountClient({
+                    account: accountTest,
+                    chain: baseSepolia,
+                    bundlerTransport: http(paymasterUrlTest),
+                    paymaster: paymasterTest,
+                });
+
+                this.logger.log(`[TESTNET] Smart Account Ready: ${accountTest.address}`);
+            } else {
+                this.logger.warn("[TESTNET] Paymaster URL missing. Skipping Smart Account init.");
+            }
+
+            if (paymasterUrlMain) {
+                const accountMain = await toSimpleSmartAccount({
+                    client: this.publicClientMain,
+                    owner: owner,
+                    entryPoint: {
+                        address: ENTRYPOINT_ADDRESS_V06,
+                        version: "0.6"
+                    },
+                    factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454"
+                });
+
+                const paymasterMain = createPaymasterClient({
+                    transport: http(paymasterUrlMain),
+                });
+
+                this.smartClientMain = createSmartAccountClient({
+                    account: accountMain,
+                    chain: base,
+                    bundlerTransport: http(paymasterUrlMain),
+                    paymaster: paymasterMain,
+                });
+                this.logger.log(`[MAINNET] Smart Account Ready: ${accountMain.address}`);
+            } else {
+                this.logger.warn("[MAINNET] Paymaster URL missing. Skipping Smart Account init.");
+            }
+
+        } catch (error) {
+            this.logger.error(`Failed to init Smart Accounts: ${error}`);
         }
     }
 
@@ -63,12 +128,12 @@ export class OpenlyGatewayService {
         return isTest ? {
             type: 'TESTNET',
             client: this.publicClientTest,
-            wallet: this.walletClientTest,
+            smartClient: this.smartClientTest,
             address: this.addressTest
         } : {
             type: 'MAINNET',
             client: this.publicClientMain,
-            wallet: this.walletClientMain,
+            smartClient: this.smartClientMain,
             address: this.addressMain
         };
     }
@@ -184,8 +249,6 @@ export class OpenlyGatewayService {
 
         this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
 
-        this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
-
         const amountBigInt = parseUnits(formattedAmount.toString(), 6);
         await this.flushPayment(merchantId, paymentRef, amountBigInt);
     }
@@ -195,15 +258,12 @@ export class OpenlyGatewayService {
             where: { merchantId_paymentRef: { merchantId, paymentRef } }
         });
 
-        if (!payment) {
-            this.logger.error(`Flush failed: Payment ${paymentRef} not found`);
-            return;
-        }
+        if (!payment) return;
 
         const ctx = this.getContext(payment.network);
 
-        if (!ctx.wallet) {
-            this.logger.error(`Flush failed: No wallet client for ${ctx.type}`);
+        if (!ctx.smartClient) {
+            this.logger.error(`Flush failed: No Smart Account for ${ctx.type} (Check Paymaster Config)`);
             return;
         }
 
@@ -220,28 +280,24 @@ export class OpenlyGatewayService {
             });
 
             if (!code || code === "0x") {
-                this.logger.log(`[${ctx.type}] Deploying forwarder for ${paymentRef}`);
-                try {
-                    const deployHash = await ctx.wallet.writeContract({
-                        address: ctx.address,
-                        abi: GATEWAY_ABI,
-                        functionName: "deployForwarder",
-                        args: [merchantId, paymentRef]
-                    });
-                    await ctx.client.waitForTransactionReceipt({ hash: deployHash });
-                } catch (deployError: any) {
-                    const checkCode = await ctx.client.getBytecode({ address: forwarderAddress });
-                    if (!checkCode || checkCode === "0x") throw deployError;
-                }
+                this.logger.log(`[${ctx.type}] Deploying forwarder for ${paymentRef} (SPONSORED)`);
+                const deployHash = await ctx.smartClient.writeContract({
+                    address: ctx.address,
+                    abi: GATEWAY_ABI,
+                    functionName: "deployForwarder",
+                    args: [merchantId, paymentRef]
+                });
+                await ctx.client.waitForTransactionReceipt({ hash: deployHash });
+                this.logger.log(`Forwarder deployed: ${deployHash}`);
             }
 
-            this.logger.log(`[${ctx.type}] Forwarding funds for ${paymentRef}`);
+            this.logger.log(`[${ctx.type}] Forwarding funds via Gateway for ${paymentRef} (SPONSORED)`);
 
-            const forwardHash = await ctx.wallet.writeContract({
-                address: forwarderAddress,
-                abi: FORWARDER_ABI,
-                functionName: "forward",
-                args: [merchantId, paymentRef, amount]
+            const forwardHash = await ctx.smartClient.writeContract({
+                address: ctx.address,
+                abi: GATEWAY_ABI,
+                functionName: "executeForward",
+                args: [forwarderAddress, merchantId, paymentRef, amount]
             });
 
             await ctx.client.waitForTransactionReceipt({ hash: forwardHash });
@@ -256,6 +312,6 @@ export class OpenlyGatewayService {
     }
 
     async getUsdcTokenAddress() {
-        return this.addressTest; // Default
+        return this.addressTest;
     }
 }
