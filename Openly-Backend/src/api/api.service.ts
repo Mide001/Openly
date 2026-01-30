@@ -10,12 +10,10 @@ export class ApiService {
     constructor(private prisma: PrismaService, private openlyGateway: OpenlyGatewayService, private settlementService: OpenlySettlementService) { }
 
     async initializePayment(apiKey: string, dto: InitializePaymentDto) {
-        // Pass network explicitly
         return await this.openlyGateway.initializePayment(apiKey, dto.paymentRef, dto.amount, dto.customer, dto.metadata, dto.network || 'TESTNET');
     }
 
     async getPaymentStatus(apiKey: string, paymentRef: string) {
-        // Hash key
         const hashedKey = createHash('sha256').update(apiKey).digest('hex');
 
         const merchant = await this.prisma.merchant.findUnique({
@@ -64,7 +62,6 @@ export class ApiService {
     }
 
     async requestPayout(apiKey: string, dto: RequestPayoutDto) {
-        // Manual Settlement now just needs key and amount, service handles hash
         return await this.settlementService.manualSettlement(apiKey, dto.amount);
     }
 

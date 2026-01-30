@@ -9,7 +9,6 @@ import { TelegramService } from "@/notifications/telegram.service";
 export class BlockchainListenerService implements OnModuleInit {
     private readonly logger = new Logger(BlockchainListenerService.name);
 
-    // State for each network
     private usdcTest: `0x${string}`;
     private usdcMain: `0x${string}`;
 
@@ -19,7 +18,6 @@ export class BlockchainListenerService implements OnModuleInit {
     constructor(private gateway: OpenlyGatewayService, private prisma: PrismaService, private telegram: TelegramService) { }
 
     async onModuleInit() {
-        // Fetch USDC token addresses from the contracts
         try {
             this.usdcTest = await this.gateway.publicClientTest.readContract({
                 address: this.gateway.addressTest,
@@ -78,7 +76,6 @@ export class BlockchainListenerService implements OnModuleInit {
         if (!usdc || !client) return;
 
         try {
-            // 1. Get Pending Payments for this network
             const pendingPayments = await this.prisma.payment.findMany({
                 where: { status: "PENDING", network: network },
                 select: { paymentAddress: true, merchantId: true, paymentRef: true }
@@ -90,12 +87,11 @@ export class BlockchainListenerService implements OnModuleInit {
             const validTargets = targets.filter(t => t && t.startsWith('0x'));
             if (validTargets.length === 0) return;
 
-            // 2. Poll for Transfer(any, target, val)
             const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
 
             const currentBlock = await client.getBlockNumber();
             if (lastBlock === 0n) {
-                lastBlock = currentBlock - 50n; // Look back small amount on startup/first-run
+                lastBlock = currentBlock - 50n;
                 if (isTest) this.lastBlockTest = lastBlock; else this.lastBlockMain = lastBlock;
             }
 
@@ -124,7 +120,6 @@ export class BlockchainListenerService implements OnModuleInit {
                 }
             }
 
-            // Update state
             if (isTest) this.lastBlockTest = currentBlock; else this.lastBlockMain = currentBlock;
 
         } catch (error) {

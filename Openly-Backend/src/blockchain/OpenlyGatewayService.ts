@@ -25,20 +25,17 @@ const FORWARDER_ABI = parseAbi([
 export class OpenlyGatewayService {
     private readonly logger = new Logger(OpenlyGatewayService.name);
 
-    // Testnet (Sepolia)
     public publicClientTest;
     public walletClientTest;
     public accountTest;
     public addressTest: Address;
 
-    // Mainnet (Base)
     public publicClientMain;
     public walletClientMain;
     public accountMain;
     public addressMain: Address;
 
     constructor(private config: ConfigService, private prisma: PrismaService, private httpService: HttpService, private telegram: TelegramService, private activityLog: ActivityLoggerService) {
-        // --- TESTNET ---
         const rpcTest = this.config.get<string>("RPC_URL_TESTNET") || this.config.get<string>("RPC_URL");
         const pkTest = this.config.get<string>("PRIVATE_KEY");
         this.addressTest = (this.config.get<string>("OPENLY_GATEWAY_ADDRESS_TESTNET") || this.config.get<string>("OPENLY_GATEWAY_ADDRESS")) as Address;
@@ -49,7 +46,6 @@ export class OpenlyGatewayService {
             this.walletClientTest = createWalletClient({ account: this.accountTest, chain: baseSepolia, transport: http(rpcTest) });
         }
 
-        // --- MAINNET ---
         const rpcMain = this.config.get<string>("RPC_URL_MAINNET") || rpcTest;
         const pkMain = this.config.get<string>("PRIVATE_KEY_MAINNET") || pkTest;
         this.addressMain = (this.config.get<string>("OPENLY_GATEWAY_ADDRESS_MAINNET") || this.addressTest) as Address;
@@ -77,9 +73,7 @@ export class OpenlyGatewayService {
         };
     }
 
-    // UPDATED: Accepts network from DTO
     async initializePayment(apiKey: string, paymentRef: string, amount: number, customerData?: any, metadata?: any, network: 'TESTNET' | 'MAINNET' = 'TESTNET') {
-        // Authenticate using Single Key
         const hashedKey = createHash('sha256').update(apiKey).digest('hex');
 
         const merchant = await this.prisma.merchant.findUnique({
@@ -88,7 +82,6 @@ export class OpenlyGatewayService {
 
         if (!merchant) throw new BadRequestException("Invalid API Key");
 
-        // Use Network from Request
         const ctx = this.getContext(network);
 
         const existing = await this.prisma.payment.findUnique({
@@ -130,7 +123,7 @@ export class OpenlyGatewayService {
                 status: "PENDING",
                 customerId: customerId,
                 metadata: metadata || {},
-                network: ctx.type // Store "TESTNET" or "MAINNET"
+                network: ctx.type
             }
         });
     }
@@ -191,13 +184,13 @@ export class OpenlyGatewayService {
 
         this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
 
-        // Trigger Flush
+        this.sendWebhook(merchantId, { event: "payment.detected", data: { paymentRef, amount: formattedAmount, txHash } });
+
         const amountBigInt = parseUnits(formattedAmount.toString(), 6);
         await this.flushPayment(merchantId, paymentRef, amountBigInt);
     }
 
     async flushPayment(merchantId: string, paymentRef: string, amount: bigint) {
-        // 1. Resolve Network Context from DB
         const payment = await this.prisma.payment.findUnique({
             where: { merchantId_paymentRef: { merchantId, paymentRef } }
         });

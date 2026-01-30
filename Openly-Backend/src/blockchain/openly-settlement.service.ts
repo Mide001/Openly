@@ -81,7 +81,6 @@ export class OpenlySettlementService {
         }
     }
 
-    // UPDATED: Accepts network
     async manualSettlement(apiKey: string, amount: number, network: 'TESTNET' | 'MAINNET' = 'TESTNET') {
         const hashedKey = createHash('sha256').update(apiKey).digest('hex');
 
@@ -91,7 +90,6 @@ export class OpenlySettlementService {
 
         if (!merchantInfo) throw new BadRequestException("Invalid API KEY");
 
-        // Select context based on Network param
         const ctx = network === 'TESTNET' ? {
             type: 'TESTNET',
             wallet: this.openlyGateway.walletClientTest,
