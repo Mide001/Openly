@@ -259,4 +259,17 @@ contract OpenlyGateway is AccessControl, Pausable, ReentrancyGuard {
     ) external view returns (uint256) {
         return merchantBalances[merchantId];
     }
+
+    /**
+     * @notice Proxy function to call forward on a PaymentForwarder
+     * @dev Allows the Gateway to act as the entry point for Paymaster whitelisting
+     */
+    function executeForward(
+        address forwarder,
+        string calldata merchantId,
+        string calldata paymentRef,
+        uint256 amount
+    ) external nonReentrant whenNotPaused {
+        PaymentForwarder(forwarder).forward(merchantId, paymentRef, amount);
+    }
 }
